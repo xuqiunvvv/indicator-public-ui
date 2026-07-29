@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
 test("public API exposes only GET snapshot requests", async () => {
   const moduleUrl = new URL("../worker/public-api.js", import.meta.url);
@@ -15,6 +16,16 @@ test("public API exposes only GET snapshot requests", async () => {
     {},
   );
   assert.equal(missingConfig.status, 503);
+
+  const snapshot = { publication: { archiveId: "PUBLIC-001" }, libraryRows: [{ key: "FUND00000001" }] };
+  const encoded = gzipSync(JSON.stringify(snapshot)).toString("base64");
+  const response = await handlePublicApi(
+    new Request("http://localhost/api/snapshot?domainId=fund"),
+    {},
+    { fund: encoded },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), snapshot);
 });
 
 test("public interface contains only library, dashboard, and export navigation", async () => {
