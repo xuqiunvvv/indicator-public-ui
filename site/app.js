@@ -142,6 +142,27 @@ function coverageData() {
   }).sort((a, b) => b.total - a.total);
 }
 
+function directoryHeatmapData() {
+  const cells = new Map();
+  library().forEach((item) => {
+    const level1 = item.l1 || "未分类";
+    const level2 = item.l2 || "未分类";
+    const key = `${level1}\u0000${level2}`;
+    const current = cells.get(key) || { level1, level2, total: 0, active: 0, deprecated: 0 };
+    current.total += 1;
+    if (item.status === "有效") current.active += 1;
+    if (item.status === "已废弃") current.deprecated += 1;
+    cells.set(key, current);
+  });
+  const rows = coverageData().map((item) => item.name);
+  const columnTotals = new Map();
+  cells.forEach((cell) => columnTotals.set(cell.level2, (columnTotals.get(cell.level2) || 0) + cell.total));
+  const columns = [...columnTotals]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"))
+    .map(([name, total]) => ({ name, total }));
+  return { rows, columns, cells, max: Math.max(1, ...[...cells.values()].map((cell) => cell.total)) };
+}
+
 function trendData() {
   const counts = new Map();
   library().forEach((item) => {
@@ -159,11 +180,23 @@ function renderDashboard() {
   const maxTrend = Math.max(1, ...trend.map((item) => item.value));
   $("#trendModeLabel").textContent = state.trendMode === "month" ? "按月" : "按周";
   $("#trendChart").innerHTML = trend.length ? trend.map((item) => `<div class="trend-column"><strong>${item.value}</strong><i style="height:${Math.max(2, Math.round(item.value / maxTrend * 170))}px"></i><span>${escapeHtml(item.label)}</span></div>`).join("") : '<div class="empty">暂无上架时间数据</div>';
-  $("#coverageHeatmap").innerHTML = coverage.length ? coverage.map((item) => {
-    const activeRate = item.total ? item.active / item.total : 0;
-    const hue = 24 + Math.round(activeRate * 125);
-    return `<div class="heat-cell" style="--heat:hsl(${hue} 48% 42%)"><strong>${escapeHtml(item.name)}</strong><span>有效 ${item.active} · 废弃 ${item.deprecated} · 共 ${item.total}</span></div>`;
-  }).join("") : '<div class="empty">暂无覆盖数据</div>';
+  const heatmap = directoryHeatmapData();
+  $("#coverageHeatmap").innerHTML = heatmap.rows.length ? `
+    <div class="heatmap-legend"><span>指标数量</span><i></i><small>少</small><small>多</small></div>
+    <div class="heatmap-scroll">
+      <table class="heatmap-table">
+        <thead><tr><th>一级目录</th>${heatmap.columns.map((column) => `<th title="${escapeHtml(column.name)}">${escapeHtml(column.name)}<small>${column.total}</small></th>`).join("")}</tr></thead>
+        <tbody>${heatmap.rows.map((level1) => `<tr><th title="${escapeHtml(level1)}">${escapeHtml(level1)}</th>${heatmap.columns.map((column) => {
+          const cell = heatmap.cells.get(`${level1}\u0000${column.name}`);
+          if (!cell) return '<td class="heat-empty" aria-label="无指标"></td>';
+          const intensity = cell.total / heatmap.max;
+          const alpha = (0.14 + intensity * 0.78).toFixed(2);
+          const textClass = intensity >= 0.56 ? " heat-strong" : "";
+          const detail = `${level1} / ${column.name}：共 ${cell.total}，有效 ${cell.active}，废弃 ${cell.deprecated}`;
+          return `<td class="heat-value${textClass}" style="--heat-alpha:${alpha}" title="${escapeHtml(detail)}" aria-label="${escapeHtml(detail)}"><strong>${cell.total}</strong><small>${cell.active}/${cell.deprecated}</small></td>`;
+        }).join("")}</tr>`).join("")}</tbody>
+      </table>
+    </div>` : '<div class="empty">暂无覆盖数据</div>';
 }
 
 function renderAll() {
