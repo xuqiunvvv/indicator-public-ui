@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="选X指标公开查询、覆盖看板与标准文档下载">
+  <title>选X指标中心</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">X</span><span><strong>选X指标中心</strong><small>公开只读版</small></span></div>
+      <nav>
+        <button class="nav-item active" data-view="library"><span class="nav-icon">标</span>选X指标库</button>
+        <button class="nav-item" data-view="dashboard"><span class="nav-icon">看</span>层级指标看板</button>
+        <button class="nav-item" data-view="export"><span class="nav-icon">出</span>导出中心</button>
+      </nav>
+      <div class="sidebar-foot"><span class="status-dot"></span><span id="publishedStatus">读取公开版本</span></div>
+    </aside>
+    <section class="workspace">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu" aria-label="打开导航">☰</button>
+        <select id="domainSelect" aria-label="选择指标域"><option value="fund">选基金</option><option value="ashare">选A股</option></select>
+        <div><h1 id="viewTitle">选X指标库</h1><p id="viewSubtitle">查询最近一次公开发布的标准指标</p></div>
+        <span class="readonly-badge">只读访问</span>
+      </header>
+      <main>
+        <section class="view active" id="view-library">
+          <div class="metric-band">
+            <div><span>公开指标</span><strong id="metricTotal">0</strong></div>
+            <div><span>有效指标</span><strong id="metricActive">0</strong></div>
+            <div><span>已废弃指标</span><strong id="metricDeprecated">0</strong></div>
+            <div><span>公开版本</span><strong class="version-value" id="metricVersion">未发布</strong></div>
+          </div>
+          <div class="toolbar">
+            <label class="search"><span>⌕</span><input id="librarySearch" type="search" placeholder="搜索指标名称、编码或介绍"></label>
+            <select id="level1Filter"><option value="">全部一级分类</option></select>
+            <select id="level2Filter"><option value="">全部二级分类</option></select>
+            <select id="typeFilter"><option value="">全部指标类型</option></select>
+            <select id="statusFilter"><option value="">全部状态</option><option>有效</option><option>已废弃</option></select>
+          </div>
+          <div class="table-wrap"><table><thead><tr><th>指标编码</th><th>指标名称</th><th>指标目录</th><th>类型</th><th>频率</th><th>状态</th><th>参数</th><th></th></tr></thead><tbody id="libraryRows"></tbody></table></div>
+          <div class="table-footer"><label>每页 <select id="pageSize"><option>20</option><option>50</option><option>100</option></select> 条</label><span id="resultCount"></span><div class="pagination" id="pagination"></div></div>
+        </section>
+
+        <section class="view" id="view-dashboard">
+          <div class="dashboard-toolbar">
+            <div class="segmented"><button class="active" data-trend-mode="month">按月</button><button data-trend-mode="week">按周</button></div>
+            <span id="dashboardRange">按公开版本统计</span>
+            <button class="btn secondary" id="exportCoverageMd">导出覆盖报告</button>
+          </div>
+          <div class="dashboard-grid">
+            <section><div class="section-heading"><h2>业务模块覆盖</h2><span>依据一级分类</span></div><div id="coverageBars" class="coverage-bars"></div></section>
+            <section><div class="section-heading"><h2>指标上架趋势</h2><span id="trendModeLabel">按月</span></div><div id="trendChart" class="trend-chart"></div></section>
+          </div>
+          <section class="heatmap-section"><div class="section-heading"><h2>目录覆盖热力图</h2><span>有效与废弃指标结构</span></div><div id="coverageHeatmap" class="heatmap"></div></section>
+        </section>
+
+        <section class="view" id="view-export">
+          <div class="export-layout">
+            <section>
+              <div class="section-heading"><div><h2>公开标准文档</h2><p>所有文件均来自当前公开版本，不包含未发布的管理数据。</p></div></div>
+              <div class="export-list">
+                <article><div><strong>指标索引表</strong><span>标准检索字段、入参和出参结构</span></div><button class="btn secondary" id="exportIndex">下载 Excel</button></article>
+                <article><div><strong>汇总指标清单</strong><span>工作表固定为“汇总指标清单”</span></div><button class="btn secondary" id="exportStandard">下载 Excel</button></article>
+                <article><div><strong>指标参数明细</strong><span>每个标准参数对应一行记录</span></div><button class="btn secondary" id="exportParameters">下载 Excel</button></article>
+                <article><div><strong>指标覆盖报告</strong><span>按月或按周统计业务模块覆盖情况</span></div><button class="btn secondary" id="exportCoverage">下载 Markdown</button></article>
+              </div>
+            </section>
+            <aside><h2>版本信息</h2><dl><div><dt>公开版本</dt><dd id="exportVersion">未发布</dd></div><div><dt>发布时间</dt><dd id="exportPublishedAt">-</dd></div><div><dt>指标域</dt><dd id="exportDomain">-</dd></div><div><dt>访问权限</dt><dd>查询与导出</dd></div></dl></aside>
+          </div>
+        </section>
+      </main>
+    </section>
+  </div>
+  <dialog id="detailDialog"><header><div><span id="detailCode"></span><h2 id="detailName"></h2></div><button id="closeDetail" aria-label="关闭">×</button></header><div class="dialog-body"><dl id="detailSummary"></dl><section><h3>指标介绍</h3><p id="detailDescription"></p></section><section><h3>标准参数</h3><div class="param-tabs"><button class="active" data-param="time">时间型入参</button><button data-param="enum">枚举型入参</button><button data-param="custom">自定义入参</button><button data-param="output">出参项</button></div><pre id="detailJson"></pre></section></div></dialog>
+  <div class="toast" id="toast"></div>
+  <script src="/export-utils.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
