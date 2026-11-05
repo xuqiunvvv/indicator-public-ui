@@ -5,13 +5,13 @@ import {prepareRelease,projectIndexSnapshot,hash,encode} from '../scripts/public
 import {collectRelease,makeFiles,verifyFrontend,publishFiles,managementClient,DIRECTORY} from '../scripts/sync-public-github.mjs';
 const fixture=()=>{
   const pointer={domainId:'bond',domainName:'选债券',archiveId:'V20261105-BOND-002',publishedAt:'2026-11-05T05:49:50.773Z',policy:{showDeprecated:true,showParameters:true,showDsInterfaceId:false,showApiUri:false,allowExport:true}};
-  const row={biz_type:'债券',level1_category:'债券',level2_category:'基本',indicator_code:'BOND1',indicator_name:'索引名称',indicator_type:'数值型',indicator_synonyms:'["别名"]',indicator_desc:'索引介绍',indicator_unit:'元',indicator_freq:'静态',is_realtime:0,filter_operators:'["EQ"]',api_name:'INTERNAL',api_uri:'PRIVATE-URI',ds_interface_id:'PRIVATE-ID',input_options:'[{"parameter_type":"TIME","parameter_name":"日期"}]',output_options:'[{"param_name":"结果","support_operators":["EQ"]}]',is_active:1};
+  const row={biz_type:'债券',level1_category:'债券',level2_category:'基本',indicator_code:'BOND1',indicator_name:'索引名称',indicator_type:'数值型',indicator_synonyms:'["别名"]',indicator_desc:'索引介绍',indicator_unit:'元',indicator_freq:'静态',is_realtime:0,filter_operators:'["EQ"]',api_name:'DataBrowser',api_uri:'PRIVATE-URI',ds_interface_id:'',input_options:'[{"parameter_type":"TIME","parameter_name":"日期"}]',output_options:'[{"param_name":"结果","support_operators":["EQ"]}]',is_active:1};
   const snapshot={publication:{...pointer,totalCount:1,effectiveCount:1,deprecatedCount:0,publishedBy:'PRIVATE-PERSON'},libraryRows:[{key:'BOND1',name:'旧名称',params:{output:[{support_operators:['IN']}]}}],indexRows:[row]};
-  return {pointer,snapshot,archive:{archive:{id:pointer.archiveId,domainId:'bond',totalCount:1},libraryRows:[{key:'BOND1',status:'有效'}]}};
+  return {pointer,snapshot,archive:{archive:{id:pointer.archiveId,domainId:'bond',totalCount:1},libraryRows:[{key:'BOND1',status:'有效',dsIds:['DS-1'],apiName:'DataBrowser'}]}};
 };
 test('index alone determines shared display fields and parameters; internal columns excluded',()=>{
   const f=fixture(),r=projectIndexSnapshot(f.snapshot,f.pointer,f.archive),row=r.libraryRows[0];
-  assert.equal(row.name,'索引名称');assert.deepEqual(row.params.output[0].support_operators,['EQ']);
+  assert.equal(row.name,'索引名称');assert.equal(row.dsInterfaceId,'DS-1');assert.equal(row.apiName,'DataBrowser');assert.deepEqual(row.params.output[0].support_operators,['EQ']);
   for(const value of ['PRIVATE-URI','PRIVATE-ID','PRIVATE-PERSON','INTERNAL','旧名称'])assert.ok(!encode(r).includes(value));
   assert.deepEqual(row.params.time,[{parameter_type:'TIME',parameter_name:'日期'}]);
 });
@@ -23,6 +23,17 @@ test('reject missing fields, invalid param JSON, duplicate IDs, wrong counts and
 test('public policy hides parameters and rejects policy drift',()=>{
   let f=fixture();f.pointer.policy.showParameters=false;assert.deepEqual(projectIndexSnapshot(f.snapshot,f.pointer,f.archive).libraryRows[0].params,{time:[],enum:[],custom:[],output:[]});
   f=fixture();f.snapshot.publication={...f.snapshot.publication,policy:{...f.pointer.policy,showParameters:false}};assert.throws(()=>projectIndexSnapshot(f.snapshot,f.pointer,f.archive));
+});
+test('owner-authorized DS column uses only selected frozen archive and rejects mismatches',()=>{
+ const f=fixture();f.archive.libraryRows[0].dsIds=['2119','2085'];
+ assert.equal(projectIndexSnapshot(f.snapshot,f.pointer,f.archive).libraryRows[0].dsInterfaceId,'2119,2085');
+ f.snapshot.indexRows[0].ds_interface_id='OTHER';assert.throws(()=>projectIndexSnapshot(f.snapshot,f.pointer,f.archive),/DS接口ID/);
+ f.snapshot.indexRows[0].ds_interface_id='';delete f.archive.libraryRows[0].dsIds;assert.throws(()=>projectIndexSnapshot(f.snapshot,f.pointer,f.archive),/DS接口ID/);
+});
+test('API name must match index and frozen archive; API URI stays excluded',()=>{
+ const f=fixture();f.snapshot.indexRows[0].api_name='TopList';f.archive.libraryRows[0].apiName='TopList';
+ const result=projectIndexSnapshot(f.snapshot,f.pointer,f.archive);assert.equal(result.libraryRows[0].apiName,'TopList');assert.ok(!encode(result).includes('PRIVATE-URI'));
+ f.snapshot.indexRows[0].api_name='Other';assert.throws(()=>projectIndexSnapshot(f.snapshot,f.pointer,f.archive),/API名称/);
 });
 test('stable hash ignores object key order; schema and rule versions enter release',()=>{
   assert.equal(hash({a:1,b:2}),hash({b:2,a:1}));const r=prepareRelease([fixture()]);assert.ok(r.manifest.schemaVersion&&r.manifest.projectionRulesVersion);assert.throws(()=>prepareRelease([]));

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-export const SCHEMA_VERSION = 'selectx-public-index-1';
-export const RULES_VERSION = 'v105-index-1';
+export const SCHEMA_VERSION = 'selectx-public-index-2';
+export const RULES_VERSION = 'v105-index-2';
+// Explicit static-site display scope requested by the owner; management policy is unchanged.
+export const DISPLAY_POLICY = {showDsInterfaceId:true,showApiName:true,showApiUri:false};
 export const DOMAIN_IDS = ['ashare', 'fund', 'block', 'bond', 'index', 'hkshare'];
 const INPUT_KEYS = new Set('default_value default_value_description default_value_type dictionary_mode dictionary_reference dictionary_values mnemonic parameter_description parameter_name parameter_type value_type'.split(' '));
 const OUTPUT_KEYS = new Set('param_name param_type param_description filterable computable value_mode values dictionary_reference support_operators'.split(' '));
@@ -43,6 +45,7 @@ export function projectIndexSnapshot(snapshot, expected, archive) {
   assert.equal(ownKeys.size, archive.libraryRows.length, '原始存档编码重复');
   const visible = archive.libraryRows.filter(r=>p.policy.showDeprecated || r.status !== '已废弃');
   const visibleKeys = new Set(visible.map(r=>r.key));
+  const ownRows = new Map(visible.map(r=>[r.key,r]));
   const index = snapshot.indexRows;
   assert.ok(Array.isArray(index), '索引表缺失');
   assert.equal(index.length, visible.length, '索引与指定存档公开范围条数不符');
@@ -53,6 +56,16 @@ export function projectIndexSnapshot(snapshot, expected, archive) {
     for (const field of INDEX_FIELDS) assert.ok(Object.hasOwn(row, field), `索引字段缺失：${field}`);
     const key = text(row.indicator_code, '指标编码');
     assert.ok(key && visibleKeys.has(key) && !seen.has(key), '索引编码重复、缺失或不属于指定存档'); seen.add(key);
+    const own = ownRows.get(key);
+    assert.ok(Array.isArray(own.dsIds) && own.dsIds.every(id=>typeof id==='string'), '指定存档缺DS接口ID字段');
+    // V105 index rule: ds_interface_id = (item.dsIds || []).join(',').
+    // Public API redacts this column when showDsInterfaceId=false. Restore ONLY this
+    // owner-authorized column from the same immutable archive, never another version.
+    const dsInterfaceId = own.dsIds.join(',');
+    const indexDs = text(row.ds_interface_id,'DS接口ID');
+    if(indexDs || p.policy.showDsInterfaceId) assert.equal(indexDs,dsInterfaceId,'索引DS接口ID与指定存档不一致');
+    const apiName = text(row.api_name,'API名称');
+    assert.equal(apiName,own.apiName || 'DataBrowser','索引API名称与指定存档不一致');
     assert.ok(row.is_active===0 || row.is_active===1, 'is_active必须为0/1');
     assert.ok(row.is_realtime===0 || row.is_realtime===1, 'is_realtime必须为0/1');
     const synonyms = arrayJSON(row.indicator_synonyms, '别名'); assert.ok(synonyms.every(x=>typeof x==='string'), '别名类型错误');
@@ -70,13 +83,13 @@ export function projectIndexSnapshot(snapshot, expected, archive) {
     }
     grouped.output = output;
     if (!p.policy.showParameters) for (const key of Object.keys(grouped)) grouped[key]=[];
-    libraryRows.push({key, name:text(row.indicator_name,'指标名称'), l1:text(row.level1_category,'一级分类'), l2:text(row.level2_category,'二级分类'), type:text(row.indicator_type,'类型'), unit:text(row.indicator_unit,'单位'), frequency:text(row.indicator_freq,'频率'), description:text(row.indicator_desc,'介绍'), synonyms, isRealtime:row.is_realtime?'是':'否', status:row.is_active?'有效':'已废弃', filterOperators:operators, params:grouped});
+    libraryRows.push({key, dsInterfaceId, apiName, name:text(row.indicator_name,'指标名称'), l1:text(row.level1_category,'一级分类'), l2:text(row.level2_category,'二级分类'), type:text(row.indicator_type,'类型'), unit:text(row.indicator_unit,'单位'), frequency:text(row.indicator_freq,'频率'), description:text(row.indicator_desc,'介绍'), synonyms, isRealtime:row.is_realtime?'是':'否', status:row.is_active?'有效':'已废弃', filterOperators:operators, params:grouped});
   }
   const effectiveCount = libraryRows.filter(r=>r.status==='有效').length, deprecatedCount=libraryRows.length-effectiveCount;
   assert.equal(p.effectiveCount,effectiveCount,'有效数不符'); assert.equal(p.deprecatedCount,deprecatedCount,'废弃数不符');
   if (!p.policy.showDeprecated) assert.equal(deprecatedCount,0,'公开策略禁止废弃指标');
   libraryRows.sort((a,b)=>a.key.localeCompare(b.key,'en'));
-  return {publication:{...pointer,totalCount:libraryRows.length,effectiveCount,deprecatedCount},libraryRows};
+  return {publication:{...pointer,totalCount:libraryRows.length,effectiveCount,deprecatedCount},displayPolicy:DISPLAY_POLICY,libraryRows};
 }
 export function prepareRelease(bundles) {
   assert.ok(bundles.length>0,'无公开版本，不自动清空站点');
@@ -88,5 +101,5 @@ export function prepareRelease(bundles) {
     domains.push({domainId:pointer.domainId,domainName:pointer.domainName,archiveId:pointer.archiveId,count:projected.libraryRows.length,policy:projected.publication.policy,sha256:hash(projected)});
   }
   domains.sort((a,b)=>DOMAIN_IDS.indexOf(a.domainId)-DOMAIN_IDS.indexOf(b.domainId));
-  return {manifest:{schemaVersion:SCHEMA_VERSION,projectionRulesVersion:RULES_VERSION,domains},snapshots};
+  return {manifest:{schemaVersion:SCHEMA_VERSION,projectionRulesVersion:RULES_VERSION,displayPolicy:DISPLAY_POLICY,domains},snapshots};
 }

@@ -14,7 +14,7 @@ function render() {
   const page = pageRows(all, state.page, state.size); state.page = page.page;
   $('#rows').replaceChildren();
   for (const item of page.rows) {
-    const row = document.createElement('tr'); textCell(row, item.key, 'code'); textCell(row, item.name, 'indicator-name'); textCell(row, [item.l1, item.l2].filter(Boolean).join(' / ')); textCell(row, item.type); textCell(row, item.frequency);
+    const row = document.createElement('tr'); textCell(row, item.key, 'code'); textCell(row, item.dsInterfaceId, 'code'); textCell(row, item.name, 'indicator-name'); textCell(row, [item.l1, item.l2].filter(Boolean).join(' / ')); textCell(row, item.type); textCell(row, item.frequency);
     const cell = textCell(row, ''); cell.replaceChildren(); const badge = document.createElement('span'); badge.className = `badge ${item.status === '有效' ? 'active' : 'inactive'}`; badge.textContent = item.status || '—'; cell.append(badge);
     const action = textCell(row, ''); action.replaceChildren(); const button = document.createElement('button'); button.className = 'text-button'; button.textContent = '查看明细'; button.setAttribute('aria-label', `查看${item.name}明细`); button.onclick = () => openDetail(item); action.append(button); $('#rows').append(row);
   }
@@ -37,7 +37,7 @@ async function loadDomain() {
 }
 function openDetail(item) {
   state.detail = item; state.group = 'time'; $('#detailName').textContent = item.name; $('#detailCode').textContent = item.key;
-  const entries = [['指标分类', [item.l1, item.l2].filter(Boolean).join(' / ')], ['指标类型', item.type], ['单位描述', item.unit], ['指标频率', item.frequency], ['是否支持实时', item.isRealtime], ['指标状态', item.status]];
+  const entries = [['指标编码', item.key], ['DS接口ID（ds_interface_id）', item.dsInterfaceId], ['所属API名称（api_name）', item.apiName], ['指标分类', [item.l1, item.l2].filter(Boolean).join(' / ')], ['指标类型', item.type], ['单位描述', item.unit], ['指标频率', item.frequency], ['是否支持实时', item.isRealtime], ['指标状态', item.status]];
   $('#detailSummary').replaceChildren();
   for (const [label, value] of entries) { const div = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value === '' || value == null ? '—' : String(value); div.append(dt, dd); $('#detailSummary').append(div); }
   $('#detailSynonyms').textContent = Array.isArray(item.synonyms) ? item.synonyms.join('，') : item.synonyms || '—'; $('#detailDescription').textContent = item.description || '—'; renderParams(); $('#detailDialog').showModal();

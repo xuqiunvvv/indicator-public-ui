@@ -1,6 +1,6 @@
 export function filterRows(rows, { query = '', l1 = '', l2 = '', status = '' } = {}) {
   const search = query.trim().toLocaleLowerCase();
-  return rows.filter(r => (!l1 || r.l1 === l1) && (!l2 || r.l2 === l2) && (!status || r.status === status) && (!search || [r.key, r.name, r.synonyms, r.description].join(' ').toLocaleLowerCase().includes(search)));
+  return rows.filter(r => (!l1 || r.l1 === l1) && (!l2 || r.l2 === l2) && (!status || r.status === status) && (!search || [r.key, r.dsInterfaceId, r.name, r.synonyms, r.description].join(' ').toLocaleLowerCase().includes(search)));
 }
 export function pageRows(rows, page = 1, size = 20) {
   const pages = Math.max(1, Math.ceil(rows.length / size)), current = Math.max(1, Math.min(page, pages)), start = (current - 1) * size;
