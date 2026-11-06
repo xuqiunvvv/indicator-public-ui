@@ -11,6 +11,17 @@ export function validateSnapshot(snapshot, expected) {
   if (!p || p.domainId !== expected.domainId || p.archiveId !== expected.archiveId || !Array.isArray(rows) || rows.length !== p.totalCount || rows.length !== expected.count) throw new Error('公开版本或指标数量不一致');
   const keys = new Set(rows.map(r => r.key)); if (keys.size !== rows.length || keys.has(undefined) || keys.has('')) throw new Error('指标编码重复或缺失');
   if (p.policy?.showDeprecated !== true && rows.some(r => r.status === '已废弃')) throw new Error('公开策略不允许展示废弃指标');
+  if(snapshot.maintenance)maintenanceForSelection(snapshot,[]);
+}
+export function maintenanceForSelection(snapshot,selected=[]){
+ const m=snapshot?.maintenance,rows=snapshot?.libraryRows||[];
+ if(m?.scope!=='LIBRARY_ONLY'||!Array.isArray(m.libraryLinks)||!Array.isArray(m.indicators)||!Array.isArray(m.parameters)||!Array.isArray(m.timeDefaultRuleOptions))throw Error('公开存档缺少完整冻结参数维护表');
+ const codes=new Set(rows.map(r=>r.key)),chosen=new Set(selected.length?selected:codes),sources=new Map(m.indicators.map(r=>[r['导入记录ID'],r])),seen=new Set(),ids=new Set();
+ if([...chosen].some(k=>!codes.has(k))||sources.size!==m.indicators.length)throw Error('所选指标或来源唯一键不正确');
+ for(const link of m.libraryLinks){if(!codes.has(link.indicatorCode)||seen.has(link.indicatorCode)||sources.get(link.importRecordId)?.['指标唯一键']!==link.sourceKey)throw Error('冻结维护表关联错误');seen.add(link.indicatorCode);if(chosen.has(link.indicatorCode))ids.add(link.importRecordId);}
+ if(seen.size!==codes.size)throw Error('冻结维护表遗漏库内指标');
+ for(const p of m.parameters)if(sources.get(p['导入记录ID'])?.['指标唯一键']!==p['指标唯一键'])throw Error('冻结参数关联错误');
+ return structuredClone({indicators:m.indicators.filter(r=>ids.has(r['导入记录ID'])),parameters:m.parameters.filter(r=>ids.has(r['导入记录ID'])),timeDefaultRuleOptions:m.timeDefaultRuleOptions});
 }
 export function presentationSnapshot(snapshot, expected) {
   validateSnapshot(snapshot, expected);
