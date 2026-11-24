@@ -4,7 +4,9 @@ export const DOMAIN_RULES = Object.freeze({
   fund: { sector: '1201001001', prefix: 'fund' },
   bond: { sector: '1301001', prefix: 'bond' },
   index: { sector: '1701002', prefix: 'index' },
-  block: { prefix: 'sector' }, hkshare: { prefix: 'hkstock' },
+  block: { prefix: 'sector' },
+  hkshare: { sector: '1401001', prefix: 'hkstock' },
+  usshare: { sector: '1501004', prefix: 'usshare' },
 });
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const copy = value => structuredClone(value);
@@ -90,7 +92,7 @@ export function resolveParameters(indicator, overrides = {}, context = {}) {
       const values = dictionary(p, context);
       if (values && !own(values, String(value))) throw Error(`值不在枚举字典中：${String(value)}`);
       if (/YYYY-MM-DD/i.test(p.value_type || '') && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) dateParts(value);
-      else if (/YYYY-MM-DD/i.test(p.value_type || '') && value !== null && !(typeof value === 'string' && /^(GetDay\(0\)|PRE_ONE_YEAR|GetQuarter\(0\)|GetTwoQuarter\(0\)|PrevTradingDay\(0\)|NewestTradingDay\(0\)|RealtimeTradingDay\(\))$/.test(value))) throw Error('日期格式应为 YYYY-MM-DD 或已确认的函数字符串');
+      else if (/YYYY-MM-DD/i.test(p.value_type || '') && value !== null && !(typeof value === 'string' && /^(GetDay\(0\)|PRE_ONE_YEAR|GetQuarter\(0\)|GetTwoQuarter\(0\)|PrevTradingDay\(0\)|NewestTradingDay\((?:0|77)\)|RealtimeTradingDay\(\))$/.test(value))) throw Error('日期格式应为 YYYY-MM-DD 或已确认的函数字符串');
       if (/^(INTEGER|INT|NUMBER|FLOAT|DOUBLE|DECIMAL)$/i.test(p.value_type || '') && value !== null && !(typeof value === 'number' || (typeof value === 'string' && /^[-+]?\d+(?:\.\d+)?$/.test(value)))) throw Error('数值格式无效');
       if (/^(INTEGER|INT)$/i.test(p.value_type || '') && !Number.isInteger(Number(value))) throw Error('应为整数');
       if (p.min_value != null && Number(value) < Number(p.min_value)) throw Error(`小于最小值 ${p.min_value}`);
@@ -227,7 +229,15 @@ export function buildIndicatorRequests(indicators, options = {}, context = {}) {
           validateExpression(express, fields); return { FilterType:'express', Express:express };
         });
         const first = members[0];
-        let body = { ApiName:first.api, WriteType:'json2', Version:'2', Compress:false, ...first.scope, Page:null, Sorts:sorts, IndicatorExps:expressions, Filters:filters };
+        let body = {
+          ApiName:first.api, WriteType:'json2', Version:'2', Compress:false,
+          ...first.scope,
+          GilCodes:first.scope.GilCodes ?? [],
+          Page:null,
+          Sorts:sorts.length ? sorts : [{ Field:'', Sort:'desc' }],
+          IndicatorExps:expressions,
+          Filters:filters.length ? filters : [{ FilterType:'express', Express:'' }],
+        };
         if (first.api !== 'RAGAPI.DataBrowser') body = context.protocols[first.api]({ body:copy(body), indicators:members.map(m => copy(m.item)) });
         jsonValue(body);
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw Error('API 协议未生成有效请求体');
