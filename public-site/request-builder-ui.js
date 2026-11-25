@@ -1,4 +1,4 @@
-import { buildIndicatorRequests, parameterDefinitions, resolveParameters, beijingDate } from './request-builder.js';
+import { buildIndicatorRequests, parameterDefinitions, resolveParameters, beijingDate, needsSectorNumberList } from './request-builder.js?v=120';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const clone = value => structuredClone(value);
@@ -7,9 +7,13 @@ export function newParameterGroup(indicator, overrides = {}) {
   return { indicator:clone(indicator), overrides:clone(overrides), instanceId:`request-instance-${++sequence}` };
 }
 export function duplicateParameterGroup(group, values) { return newParameterGroup(group.indicator, values || group.overrides); }
+function readSectorNumberList(input) {
+  return String(input || '').split(/[,，、\s]+/).filter(Boolean).map(value => /^\d+$/.test(value) ? Number(value) : value);
+}
 export function openRequestBuilder(getCurrent) {
   document.querySelector('#requestBuilderDialog')?.remove();
   const initial = getCurrent();
+  const hasLegacySector = initial.indicators.some(needsSectorNumberList);
   const fingerprint = JSON.stringify(initial);
   let groups = initial.indicators.map(i => newParameterGroup(i));
   let result, selectedRequest = 0, fresh = false, timer;
@@ -20,6 +24,7 @@ export function openRequestBuilder(getCurrent) {
     <footer><span class="rb-feedback" role="status"></span><button type="button" class="btn secondary" data-rb-generate>重新生成</button><button type="button" class="btn primary" data-rb-copy disabled>复制请求体</button></footer>`;
   document.body.append(dialog);
   const $ = s => dialog.querySelector(s);
+  if (hasLegacySector) $('.rb-mode').insertAdjacentHTML('afterend', '<label class="rb-param"><span>旧版板块接口 · 板块编号<small>填写具体板块编号，多个用逗号或换行分隔</small></span><textarea data-rb-sector-numbers rows="2" placeholder="例如 1112002"></textarea></label>');
   const context = () => ({ baseDate:beijingDate(), source:initial.source, dictionaries:initial.dictionaries || {} });
   $('.rb-source').textContent = `${initial.source} · 已选 ${initial.indicators.length} 项 · 参数定义来自所选公开版本`;
   function unchanged() { return JSON.stringify(getCurrent()) === fingerprint; }
@@ -79,7 +84,8 @@ export function openRequestBuilder(getCurrent) {
       let definitions; try { definitions = parameterDefinitions(group.indicator); } catch { return; }
       article.querySelectorAll('[data-param-index]').forEach(input => {
         const p = definitions[Number(input.dataset.paramIndex)];
-        const previous = effective(group).params[p.mnemonic];
+        const resolved = effective(group).params;
+        const previous = Object.hasOwn(resolved,p.mnemonic) ? resolved[p.mnemonic] : p.default_value;
         const original = previous && typeof previous === 'object' ? JSON.stringify(previous) : previous == null ? '' : String(previous);
         const previousType = previous === null ? 'null' : typeof previous === 'object' ? 'json' : typeof previous === 'number' ? 'number' : typeof previous === 'boolean' ? 'boolean' : 'string';
         const type = input.dataset.valueType || article.querySelector(`[data-type-index="${input.dataset.paramIndex}"]`).value;
@@ -108,11 +114,16 @@ export function openRequestBuilder(getCurrent) {
   function generate() {
     if (!unchanged()) { invalidate('当前指标定义已变化，请关闭窗口后重新打开'); return; }
     const errors = collect();
-    result = errors.length ? { requests:[], errors, generationMeta:{baseDate:beijingDate()} } : buildIndicatorRequests(groups.map(g => ({...g.indicator, instanceId:g.instanceId, overrides:g.overrides})), { mode:$('[name="rb-mode"]:checked').value, sorts:[], filters:[] }, context());
+    const sectorNumbers = hasLegacySector ? readSectorNumberList($('[data-rb-sector-numbers]').value) : [];
+    const indicators = groups.map(g => ({...g.indicator, instanceId:g.instanceId, overrides:g.overrides,
+      ...(needsSectorNumberList(g.indicator) ? { scope:{SectorNums:sectorNumbers} } : {}),
+    }));
+    result = errors.length ? { requests:[], errors, generationMeta:{baseDate:beijingDate()} } : buildIndicatorRequests(indicators, { mode:$('[name="rb-mode"]:checked').value }, context());
     selectedRequest = 0; fresh = true; renderGroups(); preview();
     $('.rb-feedback').textContent = `基准日 ${result.generationMeta.baseDate}（北京时间）${result.errors.length ? ' · 失败请求未生成' : ' · 已生成，可复制当前请求'}`;
   }
   $('[data-rb-generate]').onclick = generate;
+  if (hasLegacySector) $('[data-rb-sector-numbers]').addEventListener('input', () => invalidate('板块编号已改变，请重新生成'));
   dialog.querySelectorAll('[name="rb-mode"]').forEach(input => input.onchange = () => invalidate());
   $('[data-rb-copy]').onclick = async () => {
     if (!unchanged()) { invalidate('指标定义已变化，请关闭窗口后重新打开'); return; }

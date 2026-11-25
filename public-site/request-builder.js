@@ -5,9 +5,22 @@ export const DOMAIN_RULES = Object.freeze({
   bond: { sector: '1301001', prefix: 'bond' },
   index: { sector: '1701002', prefix: 'index' },
   block: { prefix: 'sector' },
-  hkshare: { sector: '1401001', prefix: 'hkstock' },
-  usshare: { sector: '1501004', prefix: 'usshare' },
+  hkshare: { sector: '1401001', prefix: 'hkstock' }, // 全部港股
+  usshare: { sector: '1501004', prefix: 'usshare' }, // 全部上市美股（不含 OTC）
 });
+// Routing is keyed by the registered API name, independently of the business domain and DS indicator code.
+export const API_PROFILES = Object.freeze({
+  'RAGAPI.DataBrowser': 'security-browser',
+  'RAGAPI.FundDataBrowser': 'security-browser',
+  'RAGAPI.SectorsDataBrowser': 'sector-expression',
+  'RAGAPI.SectorDataBrowser': 'sector-number-list',
+  'RAGAPI.TopListEntryDetail': 'sector-report',
+  'RAGAPI.TopListBranch': 'sector-report',
+  'RAGAPI.MainBizComposition': 'sector-report',
+  'RAGAPI.StockRepurchase': 'sector-report',
+  'RAGAPI.MergerRestruct': 'sector-report',
+});
+const canonicalApis = new Map(Object.keys(API_PROFILES).map(name => [name.toLowerCase(), name]));
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const copy = value => structuredClone(value);
 const empty = value => value == null || (typeof value === 'string' && !value.trim());
@@ -60,6 +73,8 @@ function resolveRule(p, context) {
     case 'PrevTradingDay(0)': { const day = new Date(`${context.baseDate}T00:00:00Z`); do { day.setUTCDate(day.getUTCDate() - 1); } while ([0, 6].includes(day.getUTCDay())); return [day.toISOString().slice(0, 10), 'PrevTradingDay(0)（仅排除周末）']; }
     case 'MRQ': return ['0001-01-01', rule];
     case 'NewestTradingDay(0)': case 'RealtimeTradingDay()': return [rule, rule];
+    case 'NewestTradingDay(HK)': case 'NewestTradingDay(72)': return ['NewestTradingDay(72)', rule];
+    case 'NewestTradingDay(US)': case 'NewestTradingDay(77)': return ['NewestTradingDay(77)', rule];
     default: {
       const values = dictionary(p, context);
       const matches = values ? Object.entries(values).filter(([, label]) => String(label) === description) : [];
@@ -81,6 +96,7 @@ function jsonValue(value) {
 export function resolveParameters(indicator, overrides = {}, context = {}) {
   context = { ...context, baseDate: context.baseDate || beijingDate() };
   const definitions = parameterDefinitions(indicator), params = {}, sources = {}, seen = new Set();
+  const topListBranch = canonicalApis.get(`ragapi.${String(indicator.apiName || indicator.apiCode || '').trim().replace(/^RAGAPI\./i, '').toLowerCase()}`) === 'RAGAPI.TopListBranch';
   for (const p of definitions) {
     const name = p.mnemonic;
     try {
@@ -89,6 +105,9 @@ export function resolveParameters(indicator, overrides = {}, context = {}) {
       seen.add(name);
       let value, source;
       const hasOverride = own(overrides, name), hasStoredDefault = !empty(p.default_value);
+      // The report treats absent TradeSide / BranchName as an unrestricted query.
+      if (topListBranch && ['TradeSide','BranchName'].includes(name)
+        && (hasOverride ? empty(overrides[name]) : !hasStoredDefault && empty(p.default_value_type))) continue;
       if (hasOverride) { value = copy(overrides[name]); source = '自定义'; }
       else if (hasStoredDefault) { value = copy(p.default_value); source = '原始默认值'; }
       else [value, source] = resolveRule(p, context);
@@ -98,7 +117,7 @@ export function resolveParameters(indicator, overrides = {}, context = {}) {
       const values = dictionary(p, context, { allowUnloadedReference: (hasOverride || hasStoredDefault) && !empty(value) });
       if (values && !own(values, String(value))) throw Error(`值不在枚举字典中：${String(value)}`);
       if (/YYYY-MM-DD/i.test(p.value_type || '') && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) dateParts(value);
-      else if (/YYYY-MM-DD/i.test(p.value_type || '') && value !== null && !(typeof value === 'string' && /^(GetDay\(0\)|PRE_ONE_YEAR|GetQuarter\(0\)|GetTwoQuarter\(0\)|PrevTradingDay\(0\)|NewestTradingDay\((?:0|77)\)|RealtimeTradingDay\(\))$/.test(value))) throw Error('日期格式应为 YYYY-MM-DD 或已确认的函数字符串');
+      else if (/YYYY-MM-DD/i.test(p.value_type || '') && value !== null && !(typeof value === 'string' && /^(GetDay\(0\)|PRE_ONE_YEAR|GetQuarter\(0\)|GetTwoQuarter\(0\)|PrevTradingDay\(0\)|NewestTradingDay\((?:0|72|77)\)|RealtimeTradingDay\(\))$/.test(value))) throw Error('日期格式应为 YYYY-MM-DD 或已确认的函数字符串');
       if (/^(INTEGER|INT|NUMBER|FLOAT|DOUBLE|DECIMAL)$/i.test(p.value_type || '') && value !== null && !(typeof value === 'number' || (typeof value === 'string' && /^[-+]?\d+(?:\.\d+)?$/.test(value)))) throw Error('数值格式无效');
       if (/^(INTEGER|INT)$/i.test(p.value_type || '') && !Number.isInteger(Number(value))) throw Error('应为整数');
       if (p.min_value != null && Number(value) < Number(p.min_value)) throw Error(`小于最小值 ${p.min_value}`);
@@ -113,28 +132,41 @@ export function resolveParameters(indicator, overrides = {}, context = {}) {
 }
 function apiName(indicator) {
   const raw = String(indicator.apiName || indicator.apiCode || '').trim();
-  if (/^(RAGAPI\.)?DATABROWSER$/i.test(raw)) return 'RAGAPI.DataBrowser';
   if (!raw) throw Error('所属 API 缺失');
-  return raw.startsWith('RAGAPI.') ? raw : `RAGAPI.${raw}`;
+  const full = `RAGAPI.${raw.replace(/^RAGAPI\./i, '')}`;
+  return canonicalApis.get(full.toLowerCase()) || full;
 }
-function scopeFields(domainId, scope, context) {
+export function needsSectorNumberList(indicator) {
+  try { return API_PROFILES[apiName(indicator)] === 'sector-number-list'; }
+  catch { return false; }
+}
+function scopeFields(domainId, scope, context, profile) {
+  const securityScope = profile === 'security-browser' || !profile;
   if (scope === undefined) {
-    const sector = DOMAIN_RULES[domainId]?.sector;
+    if (profile === 'sector-number-list') throw Error('旧版板块接口需填写具体板块编号（正整数列表）');
+    const sector = profile === 'sector-expression' ? '1105' : DOMAIN_RULES[domainId]?.sector;
     if (!sector) throw Error('当前范式的全市场板块编码尚未确认');
     return { SectorNums: sector };
   }
-  if (!scope || typeof scope !== 'object') throw Error('指定范围无效');
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) throw Error('指定范围无效');
+  if (profile === 'sector-number-list') {
+    if (scope.GilCodes !== undefined && (!Array.isArray(scope.GilCodes) || scope.GilCodes.length)) throw Error('旧版板块接口不接受证券代码 GilCodes');
+    if (!Array.isArray(scope.SectorNums) || !scope.SectorNums.length || scope.SectorNums.some(x => !Number.isSafeInteger(x) || x <= 0)) throw Error('旧版板块接口需填写具体板块编号，SectorNums 必须为正整数数组');
+    return { SectorNums: [...new Set(scope.SectorNums)] };
+  }
   const fields = {};
   if (scope.SectorNums != null && typeof scope.SectorNums !== 'string') throw Error('SectorNums 只支持单个板块编码字符串');
   if (scope.SectorNums?.trim()) fields.SectorNums = scope.SectorNums.trim();
   if (scope.GilCodes !== undefined) {
     if (!Array.isArray(scope.GilCodes) || scope.GilCodes.some(x => typeof x !== 'string' || !x.trim())) throw Error('GilCodes 应为非空标的代码的数组');
     const codes = [...new Set(scope.GilCodes.map(x => x.trim()))];
+    if (codes.length && !securityScope) throw Error('此 API 仅接受板块范围 SectorNums，不接受证券代码 GilCodes');
     const validator = context.gilCodeValidators?.[domainId] || (domainId === 'ashare' ? x => /^\d{6}\.(SZ|SH|BJ)$/.test(x) : null);
     if (codes.length && !validator) throw Error('当前市场标的代码校验规则未配置');
     if (codes.some(x => !validator(x))) throw Error('标的代码格式或市场后缀无效');
     if (codes.length) fields.GilCodes = codes;
   }
+  if (profile === 'sector-expression' && /-\s*\d/.test(fields.SectorNums || '')) throw Error('板块数据浏览器不支持负数板块编号');
   if (!Object.keys(fields).length) throw Error('指定范围为空，不会回退到全市场');
   return fields;
 }
@@ -184,14 +216,18 @@ export function buildIndicatorRequests(indicators, options = {}, context = {}) {
   try { dateParts(context.baseDate); } catch(e) { return { requests, errors:[{ message:e.message }], generationMeta }; }
   for (let i = 0; i < indicators.length; i++) {
     const item = indicators[i], instanceId = item.instanceId || `instance-${i + 1}`, domainId = item.domainId || options.domainId;
-    let api, scope, preparationError;
+    let api, scope, profile, adapter, preparationError;
     try {
       if (ids.has(instanceId)) throw Error('重复的内部实例标识'); ids.add(instanceId);
-      api = apiName(item); scope = scopeFields(domainId, own(item, 'scope') ? item.scope : options.scope, context);
+      api = apiName(item);
+      profile = API_PROFILES[api];
+      adapter = api !== 'RAGAPI.DataBrowser' && own(context.protocols || {}, api) ? context.protocols[api] : null;
+      if (!profile && typeof adapter !== 'function') throw Error(`API 协议尚未配置：${api}`);
+      scope = scopeFields(domainId, own(item, 'scope') ? item.scope : options.scope, context, profile);
     } catch(e) { preparationError = e; }
     const groupKey = options.mode === 'separate' ? `single-${i}` : JSON.stringify([api || item.apiName || item.apiCode, domainId, scope || item.scope || options.scope]);
     if (!groups.has(groupKey)) groups.set(groupKey, []);
-    groups.get(groupKey).push({ item, instanceId, domainId, api, scope, preparationError });
+    groups.get(groupKey).push({ item, instanceId, domainId, api, scope, profile, adapter, preparationError });
   }
   for (const members of groups.values()) {
     const groupErrors = [], expressions = [], counts = new Map(), aliases = new Map(), seenCodes = new Map();
@@ -199,7 +235,6 @@ export function buildIndicatorRequests(indicators, options = {}, context = {}) {
     for (const m of members) {
       try {
         if (m.preparationError) throw m.preparationError;
-        if (m.api !== 'RAGAPI.DataBrowser' && !context.protocols?.[m.api]) throw Error(`API 协议尚未配置：${m.api}`);
         const ids = m.item.dsIds;
         if (!Array.isArray(ids) || !ids.length || ids.some(x => empty(x))) throw Error('接口编码 dsIds 缺失');
         const code = m.item.interfaceCode != null ? String(m.item.interfaceCode) : ids.length === 1 ? String(ids[0]) : '';
@@ -235,16 +270,20 @@ export function buildIndicatorRequests(indicators, options = {}, context = {}) {
           validateExpression(express, fields); return { FilterType:'express', Express:express };
         });
         const first = members[0];
+        const securityBrowser = first.profile === 'security-browser';
+        if (first.profile && !securityBrowser && (sorts.length || filters.length)) throw Error('此 API 未确认支持通用排序或筛选，请勿传入 Sorts 或 Filters');
+        // Generated placeholders are for copying/editing. Explicit sort/filter input keeps its existing validation and empty-array behavior.
         let body = {
-          ApiName:first.api, WriteType:'json2', Version:'2', Compress:false,
-          ...first.scope,
-          GilCodes:first.scope.GilCodes ?? [],
-          Page:null,
-          Sorts:sorts.length ? sorts : [{ Field:'', Sort:'desc' }],
+          ApiName:first.api, WriteType:'json2', Version:'2', Compress:false, ...first.scope,
           IndicatorExps:expressions,
-          Filters:filters.length ? filters : [{ FilterType:'express', Express:'' }],
         };
-        if (first.api !== 'RAGAPI.DataBrowser') body = context.protocols[first.api]({ body:copy(body), indicators:members.map(m => copy(m.item)) });
+        if (securityBrowser || !first.profile) {
+          if (securityBrowser && !own(first.scope,'GilCodes')) body.GilCodes = [];
+          body.Page = null;
+          body.Sorts = securityBrowser && options.sorts === undefined ? [{Field:'',Sort:'desc'}] : sorts;
+          body.Filters = securityBrowser && options.filters === undefined ? [{FilterType:'express',Express:''}] : filters;
+        }
+        if (typeof first.adapter === 'function') body = first.adapter({ body:copy(body), indicators:members.map(m => copy(m.item)) });
         jsonValue(body);
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw Error('API 协议未生成有效请求体');
         requests.push({ body, instanceIds:members.map(m => m.instanceId) });
