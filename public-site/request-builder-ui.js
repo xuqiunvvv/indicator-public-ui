@@ -1,4 +1,4 @@
-import { buildIndicatorRequests, parameterDefinitions, resolveParameters, beijingDate, needsSectorNumberList } from './request-builder.js?v=120';
+import { buildIndicatorRequests, parameterDefinitions, resolveParameters, beijingDate, needsSectorNumberList } from './request-builder.js?v=121';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const clone = value => structuredClone(value);

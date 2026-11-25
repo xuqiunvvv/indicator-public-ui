@@ -144,7 +144,7 @@ function scopeFields(domainId, scope, context, profile) {
   const securityScope = profile === 'security-browser' || !profile;
   if (scope === undefined) {
     if (profile === 'sector-number-list') throw Error('旧版板块接口需填写具体板块编号（正整数列表）');
-    const sector = profile === 'sector-expression' ? '1105' : DOMAIN_RULES[domainId]?.sector;
+    const sector = profile === 'sector-expression' ? '1105|1119|1121' : DOMAIN_RULES[domainId]?.sector;
     if (!sector) throw Error('当前范式的全市场板块编码尚未确认');
     return { SectorNums: sector };
   }
