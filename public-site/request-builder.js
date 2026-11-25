@@ -30,9 +30,14 @@ const descriptions = [
   [/最近.*(?:半年末|半年期末)/, 'GetTwoQuarter(0)'],
   [/最新已披露报告期/, 'MRQ'],
 ];
-function dictionary(parameter, context) {
+function dictionary(parameter, context, { allowUnloadedReference = false } = {}) {
   let values = parameter.dictionary_values;
-  if (parameter.dictionary_mode === 'REFERENCE') values = context.dictionaries?.[parameter.dictionary_reference];
+  if (parameter.dictionary_mode === 'REFERENCE') {
+    values = context.dictionaries?.[parameter.dictionary_reference];
+    // A concrete request value can be serialized without remote enumeration data.
+    // Never infer a code from a label or skip validation of a dictionary that is present.
+    if (values == null && allowUnloadedReference) return undefined;
+  }
   if (values != null && (typeof values !== 'object' || Array.isArray(values))) throw Error('枚举字典格式无法解析');
   if (parameter.dictionary_mode === 'REFERENCE' && !values) throw Error(`引用字典未加载：${parameter.dictionary_reference || '缺少引用'}`);
   if ((parameter.parameter_type === 'ENUM' || parameter.dictionary_mode === 'INLINE') && (!values || !Object.keys(values).length)) throw Error('枚举字典缺失或为空');
@@ -83,13 +88,14 @@ export function resolveParameters(indicator, overrides = {}, context = {}) {
       if (seen.has(name)) throw Error('重复参数助记符');
       seen.add(name);
       let value, source;
-      if (own(overrides, name)) { value = copy(overrides[name]); source = '自定义'; }
-      else if (!empty(p.default_value)) { value = copy(p.default_value); source = '原始默认值'; }
+      const hasOverride = own(overrides, name), hasStoredDefault = !empty(p.default_value);
+      if (hasOverride) { value = copy(overrides[name]); source = '自定义'; }
+      else if (hasStoredDefault) { value = copy(p.default_value); source = '原始默认值'; }
       else [value, source] = resolveRule(p, context);
       if (value === null && p.nullable !== true && p.allow_null !== true) throw Error('参数未声明允许 null');
       if (typeof value === 'string' && !value.trim() && p.allow_empty !== true) throw Error('参数不允许空值');
       jsonValue(value);
-      const values = dictionary(p, context);
+      const values = dictionary(p, context, { allowUnloadedReference: (hasOverride || hasStoredDefault) && !empty(value) });
       if (values && !own(values, String(value))) throw Error(`值不在枚举字典中：${String(value)}`);
       if (/YYYY-MM-DD/i.test(p.value_type || '') && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) dateParts(value);
       else if (/YYYY-MM-DD/i.test(p.value_type || '') && value !== null && !(typeof value === 'string' && /^(GetDay\(0\)|PRE_ONE_YEAR|GetQuarter\(0\)|GetTwoQuarter\(0\)|PrevTradingDay\(0\)|NewestTradingDay\((?:0|77)\)|RealtimeTradingDay\(\))$/.test(value))) throw Error('日期格式应为 YYYY-MM-DD 或已确认的函数字符串');
